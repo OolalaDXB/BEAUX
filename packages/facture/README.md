@@ -16,10 +16,11 @@ src/facturx-extract.ts     finding the structured XML in an incoming PDF or XML
 src/facturx-parse.ts       reading an incoming CII invoice
 src/ingest.ts              supplier matching and de-duplication verdict (inbound)
 src/llm-invoice.ts         unstructured branch: coercion, arithmetic guard, SKU
+src/b2brouter-ereporting.ts B2Brouter e-reporting: payments → F10 reports, report states, ledgers (import directly, not via index)
 src/ereporting.ts          e-reporting (flux 10.3 / 10.4): Paris days, periods by VAT regime, daily aggregates, idempotent period report, provider contract, reconciliation
 ```
 
-## Tests — `npm run test:facture` (strict typecheck, then vitest), 161
+## Tests — `npm run test:facture` (strict typecheck, then vitest), 170
 
 The 135 tests that came with the package, plus `facturx-roundtrip.test.ts`: the
 whole chain inside the package — build → embed into PDF/A-3 → extract → parse —
@@ -80,11 +81,32 @@ To confirm before relying on it: payment data under the franchise (encoded as
 not due — the DGFiP table lists none), the category of a franchise sale (encoded
 as TPS1/TLB1 at 0 %), and every rule against the current DGFiP external specs.
 
+### B2Brouter (OpenAPI v2026-06-26, read 2026-09-30)
+
+B2Brouter derives the declarations from what lives on its side, so
+`b2brouter-ereporting.ts` is small:
+
+- **once per company**: Tax Report Setting `dgfip` — `vat_regime`
+  (`B2B_VAT_REGIME` maps ours), `type_operation`, `enterprise_size`, `naf_code`,
+  `auto_generate` / `auto_send`, `reason_vat_exempt` (default VATEX-FR-FRANCHISE);
+- **transactions (10.1 / 10.3)**: generated from the invoices the account issues,
+  B2C included — a B2C sale goes through the same invoice import as flux 1;
+- **payments (10.2 / 10.4)**: `recordPayment` → `POST /accounts/{id}/payments` on
+  the invoice; B2Brouter emits the F10 payment report. The API has no idempotency
+  key there, so the host's receipt id is the payment `reference` and an existing
+  one is returned instead of posting again;
+- **follow-up**: `taxReportsForInvoice` (states mapped to GENERATED / SUBMITTED /
+  ACCEPTED / REJECTED, `registered_with_errors` flagged), `ledger`.
+
+Not yet exercised against the sandbox. The first run will tell: whether a B2C
+invoice imported as Factur-X is accepted and turned into a flux 10 transaction,
+and what the Ledger XML looks like (to plug `reconcileAggregates` on it).
+
 ## Next
 
-1. B2Brouter e-reporting connector (Tax Report Settings `dgfip`, `POST
-   /accounts/{id}/tax_reports`, Ledgers) — needs its OpenAPI, which this
-   environment cannot reach yet.
-2. Confirm VATEX-FR-FRANCHISE and the BT-32 value in the platform sandbox.
+1. Sandbox run of the above (needs the sandbox key as a Supabase secret of the
+   host project, and the company's `dgfip` setting in the sandbox).
+2. Confirm the BT-32 value in the platform sandbox (VATEX-FR-FRANCHISE is
+   B2Brouter's own default exemption code).
 
 Public name to decide: "Factur-X" is the name of the standard itself.

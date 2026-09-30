@@ -23,7 +23,12 @@
  *     Franchise en base : aucune TVA n'est exigible, la table DGFiP ne prévoit
  *     pas de données de paiement — À CONFIRMER avant de s'en remettre à ce
  *     choix (paymentReportingRequired).
- *   • le jour d'une opération est le jour CIVIL À PARIS, pas en UTC.
+ *   • le jour d'une opération est le jour CIVIL À PARIS, pas en UTC ;
+ *   • le réel simplifié est supprimé au 01/01/2027 (traité ensuite comme le
+ *     réel normal trimestriel — même périodicité mensuelle).
+ * Les périodicités et le code d'exonération VATEX-FR-FRANCHISE sont
+ * identiques à ceux de l'OpenAPI B2Brouter v2026-06-26 (Tax Report Setting
+ * dgfip), lue le 30/09/2026.
  *
  * Ce module ne parle à aucune PA. Il produit des rapports déterministes,
  * vérifiables et idempotents ; un connecteur (EReportingProvider) les
