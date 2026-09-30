@@ -49,10 +49,18 @@ Relative imports have no extension (Vite / vitest resolve them). A Deno host
 generates extension-ful copies — SILLON does it with
 `scripts/einvoicing-core-sync.mjs`.
 
+## Hosts
+
+- **SILLON** — `packages/einvoicing-core/src` is a copy of this `src/`, pinned by
+  `UPSTREAM.json` (BEAUX commit + SHA-256 per file) and guarded by a blocking CI
+  check (`npm run einvoicing:upstream:check`). To ship a change: commit it here,
+  then in SILLON `node scripts/einvoicing-core-upstream.mjs --from <BEAUX checkout>`
+  and `npm run sync:einvoicing` (Deno copies). Adopted in SILLON #229 (2026-09-30).
+
 ## Next
 
-1. SILLON consumes this package instead of its in-repo copy (a PR in SILLON).
-2. e-reporting (B2C transactions, payment data) — design first, depends on the
+1. e-reporting (B2C transactions, payment data) — design first, depends on the
    approved platform's API.
+2. Confirm VATEX-FR-FRANCHISE and the BT-32 value in the platform sandbox.
 
 Public name to decide: "Factur-X" is the name of the standard itself.
