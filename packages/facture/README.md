@@ -105,7 +105,10 @@ and what the Ledger XML looks like (to plug `reconcileAggregates` on it).
 ## Next
 
 1. Sandbox run of the above (needs the sandbox key as a Supabase secret of the
-   host project, and the company's `dgfip` setting in the sandbox).
+   host project). The `dgfip` setting now exists on sandbox account 343190: it
+   was created through the API (`POST /accounts/{id}/tax_report_settings`, which
+   the free sandbox allows), `start_date` must be on or after 2026-10-01, and the
+   response carries an `issue_only` field. Steps: [`../../ROADMAP.md`](../../ROADMAP.md).
 2. Confirm the BT-32 value in the platform sandbox (VATEX-FR-FRANCHISE is
    B2Brouter's own default exemption code).
 

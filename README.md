@@ -5,10 +5,12 @@ The BEAU building blocks, shared by Oolala's products. Private.
 | Package | What it is | First host |
 |---|---|---|
 | [`packages/ph`](packages/ph) | **BEAU PH** — the payment hub: one contract for every payment rail (Stripe, PayPal, Wise, Aani, bank transfer, cash, SoftPOS handoff, M-PESA / Paynow / Ozow / PayShap boundaries), BEAU FX, and the `beau_ph` Postgres schema that holds requests, attempts, events and reconciliation. | Coach Gari |
-| [`packages/facture`](packages/facture) | **FactureX** — e-invoicing core: Factur-X (EN 16931) generation, PDF/A-3, provider contract for approved platforms (iopole, B2Brouter), inbound ingestion. *Arriving from SILLON — phase B.* | SILLON |
+| [`packages/facture`](packages/facture) | **FactureX** — e-invoicing core: Factur-X (EN 16931) generation, PDF/A-3, provider contract for approved platforms (iopole, B2Brouter), inbound ingestion. | SILLON |
 
 The two packages do not depend on each other. Linking a payment to an invoice is
 a host's job, written in the product that uses both.
+
+State and next steps: [`ROADMAP.md`](ROADMAP.md).
 
 ## How a product uses a package
 
