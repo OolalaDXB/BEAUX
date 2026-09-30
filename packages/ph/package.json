@@ -1,0 +1,13 @@
+{
+  "name": "@beaux/ph",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BEAU PH — payment hub: provider contract, registry, provider adapters, and the beau_ph Postgres schema (migrations + contract suite).",
+  "type": "module",
+  "exports": {
+    "./contracts/*": "./contracts/*",
+    "./core/*": "./core/*",
+    "./providers/*": "./providers/*",
+    "./host-adapters/*": "./host-adapters/*"
+  }
+}
