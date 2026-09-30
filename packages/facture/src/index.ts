@@ -40,3 +40,6 @@ export * from './facturx-parse';
 
 // — Branche non structurée : coercition + garde-fou arithmétique + SKU
 export * from './llm-invoice';
+
+// — E-reporting (flux 10.3 / 10.4) : périodes, agrégats, rapport idempotent, contrat PA
+export * from './ereporting';

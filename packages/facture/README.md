@@ -16,9 +16,10 @@ src/facturx-extract.ts     finding the structured XML in an incoming PDF or XML
 src/facturx-parse.ts       reading an incoming CII invoice
 src/ingest.ts              supplier matching and de-duplication verdict (inbound)
 src/llm-invoice.ts         unstructured branch: coercion, arithmetic guard, SKU
+src/ereporting.ts          e-reporting (flux 10.3 / 10.4): Paris days, periods by VAT regime, daily aggregates, idempotent period report, provider contract, reconciliation
 ```
 
-## Tests — `npm run test:facture` (strict typecheck, then vitest), 146
+## Tests — `npm run test:facture` (strict typecheck, then vitest), 161
 
 The 135 tests that came with the package, plus `facturx-roundtrip.test.ts`: the
 whole chain inside the package — build → embed into PDF/A-3 → extract → parse —
@@ -57,10 +58,33 @@ generates extension-ful copies — SILLON does it with
   then in SILLON `node scripts/einvoicing-core-upstream.mjs --from <BEAUX checkout>`
   and `npm run sync:einvoicing` (Deno copies). Adopted in SILLON #229 (2026-09-30).
 
+## E-reporting — core added 2026-09-30, no platform wired yet
+
+`ereporting.ts` knows no platform. It turns B2C sales and payments into the
+reports the reform asks for:
+
+- **flux 10.3** (B2C transactions): one line per Paris day, currency, category
+  (TLB1 goods · TPS1 services · TNT1 outside French VAT · TMA1 margin) and VAT
+  rate, with the number of sales;
+- **flux 10.4** (B2C payments): received amounts per day and rate, services only;
+- **periods** by VAT regime — transactions: réel normal mensuel by décade,
+  réel normal trimestriel and réel simplifié monthly, franchise every two months;
+  payments monthly;
+- a **period report** refuses an operation outside its period, hashes its content
+  (same content → same idempotency key, a correction → a new one);
+- `EReportingProvider`: a platform takes either the aggregates or the single
+  operations (it aggregates itself — B2Brouter's "Ledgers"); in the second case
+  our aggregates are control totals, checked by `reconcileAggregates`.
+
+To confirm before relying on it: payment data under the franchise (encoded as
+not due — the DGFiP table lists none), the category of a franchise sale (encoded
+as TPS1/TLB1 at 0 %), and every rule against the current DGFiP external specs.
+
 ## Next
 
-1. e-reporting (B2C transactions, payment data) — design first, depends on the
-   approved platform's API.
+1. B2Brouter e-reporting connector (Tax Report Settings `dgfip`, `POST
+   /accounts/{id}/tax_reports`, Ledgers) — needs its OpenAPI, which this
+   environment cannot reach yet.
 2. Confirm VATEX-FR-FRANCHISE and the BT-32 value in the platform sandbox.
 
 Public name to decide: "Factur-X" is the name of the standard itself.
