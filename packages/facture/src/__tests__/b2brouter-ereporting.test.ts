@@ -32,6 +32,10 @@ function fakeB2B() {
         { id: 1, state: 'registered', ledger_id: 7 }, { id: 2, state: 'processing' }, { id: 3, state: 'registered_with_errors' }, { id: 4, state: 'refused' },
       ] }), { status: 200 });
     }
+    if (method === 'GET' && u.pathname.endsWith('/tax_report_settings/dgfip')) {
+      if (u.pathname.includes('/accounts/0/')) return new Response('{"errors":["Not found"]}', { status: 404 });
+      return new Response(JSON.stringify({ tax_report_setting: { code: 'dgfip', enabled: true, vat_regime: 'franchise_en_base', type_operation: 'services' } }), { status: 200 });
+    }
     if (method === 'GET' && u.pathname.startsWith('/ledgers/')) {
       return new Response(JSON.stringify({ ledger: { id: 7, type: 'F10', state: 'registered' } }), { status: 200 });
     }
@@ -107,6 +111,12 @@ describe('B2Brouter e-reporting — following the reports', () => {
   });
   it('our VAT regimes map to B2Brouter\'s vat_regime values', () => {
     expect(B2B_VAT_REGIME).toEqual({ reel_normal_mensuel: 'reel_normal_mensuel', reel_normal_trimestriel: 'reel_normal_trimestriel', reel_simplifie: 'simplifie', franchise: 'franchise_en_base' });
+  });
+  it('reads the company DGFiP setting, and says so when there is none', async () => {
+    const f = fakeB2B();
+    expect(await new B2BrouterEReporting(cfg, f.fetchFn).taxReportSetting()).toMatchObject({ code: 'dgfip', vat_regime: 'franchise_en_base' });
+    expect(await new B2BrouterEReporting({ ...cfg, accountId: '0' }, f.fetchFn).taxReportSetting()).toBeNull();
+    expect(f.calls.every((c) => c.method === 'GET')).toBe(true);
   });
   it('payment method codes are B2Brouter\'s own table', () => {
     expect(B2B_PAYMENT_METHOD).toMatchObject({ cash: 1, bank_transfer: 4, bank_card: 19, credit_card: 54, sepa_transfer: 58 });

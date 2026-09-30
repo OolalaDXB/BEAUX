@@ -127,6 +127,25 @@ export class B2BrouterEReporting {
     return (await res.json()) as T;
   }
 
+  /**
+   * Le réglage e-reporting de la société (Tax Report Setting `dgfip`) — lu,
+   * jamais écrit ici : l'activer publie la société à l'annuaire DGFiP (propagé
+   * en 24 h), c'est une décision de l'exploitant, prise dans l'interface
+   * B2Brouter. null si le compte n'en a pas.
+   */
+  async taxReportSetting(): Promise<Record<string, unknown> | null> {
+    try {
+      const body = await this.api<{ tax_report_setting?: Record<string, unknown> }>(
+        'GET tax_report_settings/dgfip',
+        `/accounts/${this.cfg.accountId}/tax_report_settings/dgfip`,
+      );
+      return body.tax_report_setting ?? null;
+    } catch (e) {
+      if (e instanceof B2BrouterApiError && e.status === 404) return null;
+      throw e;
+    }
+  }
+
   /** Paiements enregistrés sur une facture B2Brouter. */
   async paymentsForInvoice(invoiceId: number): Promise<B2BrouterPayment[]> {
     const body = await this.api<{ payments?: B2BrouterPayment[] }>(
