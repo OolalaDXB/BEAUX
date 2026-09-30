@@ -346,11 +346,19 @@ export interface EReportingProvider {
  * Chaque écart est une ligne lisible (jour, clé, attendu, reçu).
  */
 export function reconcileAggregates(expected: EReport['aggregates'], received: EReport['aggregates']): string[] {
-  const key = (a: Record<string, unknown>) => ['day', 'currency', 'category', 'vatRate'].map((k) => a[k] ?? '').join('|');
-  const val = (a: Record<string, unknown>) =>
+  type Row = Record<string, unknown>;
+  const key = (a: Row): string => ['day', 'currency', 'category', 'vatRate'].map((k) => a[k] ?? '').join('|');
+  const val = (a: Row): Row =>
     'amount' in a ? { count: a.count, amount: a.amount } : { count: a.count, taxExclusive: a.taxExclusive, tax: a.tax };
-  const exp = new Map(expected.map((a) => [key(a as unknown as Record<string, unknown>), val(a as unknown as Record<string, unknown>)]));
-  const rec = new Map(received.map((a) => [key(a as unknown as Record<string, unknown>), val(a as unknown as Record<string, unknown>)]));
+  // Construit à la main plutôt que par new Map(entries) : un projet non strict
+  // (SILLON) n'infère pas les paires [clé, valeur] d'un .map() et refuse l'appel.
+  const index = (rows: EReport['aggregates']): Map<string, Row> => {
+    const m = new Map<string, Row>();
+    for (const r of rows as unknown as Row[]) m.set(key(r), val(r));
+    return m;
+  };
+  const exp = index(expected);
+  const rec = index(received);
   const out: string[] = [];
   for (const [k, v] of exp) {
     const r = rec.get(k);
