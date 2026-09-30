@@ -1,0 +1,19 @@
+{
+  "name": "@beaux/facture",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FactureX — e-invoicing core: provider contract for approved platforms, orchestration and lifecycle, the French Factur-X format module (CII D22B + PDF/A-3 + extraction), inbound ingestion. Imported from SILLON packages/einvoicing-core.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "pdf-lib": "1.17.1",
+    "fast-xml-parser": "4.5.3"
+  },
+  "scripts": {
+    "test": "vitest run"
+  }
+}

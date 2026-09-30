@@ -3,11 +3,19 @@
   "private": true,
   "description": "BEAU building blocks: BEAU PH (payments) and FactureX (e-invoicing), shared by Oolala's products.",
   "type": "module",
-  "workspaces": ["packages/*"],
-  "engines": { "node": ">=22.18" },
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
   "scripts": {
-    "test": "npm run test:ph",
+    "test": "npm run test:ph && npm run test:facture",
     "test:ph": "node packages/ph/tests/imports.test.mjs && node packages/ph/tests/webhook-signature.test.mjs && node packages/ph/tests/stripe-embedded.test.mjs",
-    "test:ph:db": "bash packages/ph/scripts/db-test.sh"
+    "test:ph:db": "bash packages/ph/scripts/db-test.sh",
+    "test:facture": "vitest run --root packages/facture"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
   }
 }
