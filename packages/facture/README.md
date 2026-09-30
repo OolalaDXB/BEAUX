@@ -18,12 +18,30 @@ src/ingest.ts              supplier matching and de-duplication verdict (inbound
 src/llm-invoice.ts         unstructured branch: coercion, arithmetic guard, SKU
 ```
 
-## Tests — `npm run test:facture` (vitest), 138
+## Tests — `npm run test:facture` (strict typecheck, then vitest), 146
 
 The 135 tests that came with the package, plus `facturx-roundtrip.test.ts`: the
 whole chain inside the package — build → embed into PDF/A-3 → extract → parse —
 on a service invoice, and the rule that each generation is a new document (new
-`/ID`, new hash), so idempotence rests on the stored canonical PDF.
+`/ID`, new hash), so idempotence rests on the stored canonical PDF; and
+`franchise-293b.test.ts` (below).
+
+Checked against SILLON too: its 82 app-level e-invoicing tests (PDF/A-3, inbound,
+supplier matching, invoice mapping) pass with this version of the package.
+
+## VAT franchise (art. 293 B CGI) — added 2026-09-30
+
+`regime.regimeCode = '293 B'` (exported as `FRANCHISE_REGIME_CODE`): category
+**E**, 0 %, exemption code **VATEX-FR-FRANCHISE**, the mention
+« TVA non applicable, art. 293 B du CGI » (`FRANCHISE_LEGAL_MENTION`, used when
+the invoice gives none) in BG-1 and as the exemption reason. The seller's VAT
+number becomes optional; without one, `seller.taxRegistrationId` (BT-32, scheme
+`FC`) is required, which is what BR-E-02 asks for. An invoice that charges VAT
+under the franchise is refused; a rate typed by mistake on a line does not create
+a second breakdown (true for every non-S category now).
+
+**To confirm before the first real emission:** the exemption code and the BT-32
+value against the approved platform's schematron, in its sandbox.
 
 ## Imports
 
@@ -33,9 +51,8 @@ generates extension-ful copies — SILLON does it with
 
 ## Next
 
-1. VAT franchise (art. 293 B CGI), which micro-entrepreneurs need.
-2. SILLON consumes this package instead of its in-repo copy (a PR in SILLON).
-3. e-reporting (B2C transactions, payment data) — design first, depends on the
+1. SILLON consumes this package instead of its in-repo copy (a PR in SILLON).
+2. e-reporting (B2C transactions, payment data) — design first, depends on the
    approved platform's API.
 
 Public name to decide: "Factur-X" is the name of the standard itself.

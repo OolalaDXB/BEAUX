@@ -14,6 +14,8 @@
  *   TVA FR standard            → catégorie S (taux par ligne)
  *   262 ter I (intracom. B2B)  → catégorie K + VATEX-EU-IC
  *   262 I (export hors UE)     → catégorie G + VATEX-EU-G
+ *   293 B (franchise en base)  → catégorie E + VATEX-FR-FRANCHISE, TVA nulle,
+ *                                mention « TVA non applicable, art. 293 B du CGI »
  *
  * Mapping des lignes SILLON (invoice_items.line_type) :
  *   product / fee → lignes de facture (BG-25)
@@ -47,6 +49,13 @@ export interface FacturXParty {
   name: string;
   siren?: string | null;
   vatNumber?: string | null;
+  /**
+   * Identifiant d'enregistrement fiscal (BT-32, schemeID « FC »). Sert au
+   * vendeur en franchise en base qui n'a pas de n° de TVA : BR-E-02 exige
+   * BT-31, BT-32 ou BT-63 dès qu'une ligne est en catégorie E. La valeur
+   * attendue par la PA est à confirmer en sandbox avant la première émission.
+   */
+  taxRegistrationId?: string | null;
   addressLine1?: string | null;
   addressLine2?: string | null;
   postalCode?: string | null;
@@ -73,7 +82,12 @@ export interface FacturXDeliveryAddress {
 
 export interface FacturXVatRegime {
   exempt: boolean;
-  /** '262 ter I' | '262 I' | null — cf. getInvoiceVatRegime (vat-utils.ts). */
+  /**
+   * '262 ter I' | '262 I' | '293 B' | null — cf. getInvoiceVatRegime (vat-utils.ts).
+   * '293 B' = franchise en base de TVA (micro-entrepreneur, petite entreprise) :
+   * catégorie E, aucune TVA facturée ; legalMention par défaut
+   * FRANCHISE_LEGAL_MENTION si absente (la mention est obligatoire).
+   */
   regimeCode: string | null;
   legalMention: string | null;
 }
@@ -170,7 +184,13 @@ export function facturxMissingFields(input: FacturXInvoiceInput): string[] {
   if (!seller.siren) missing.push('seller_siren');
   // BT-31 : identifiant TVA vendeur — requis dès qu'une TVA est facturée, et
   // exigé aussi en exonération (la mention d'exonération s'y réfère).
-  if (!seller.vatNumber) missing.push('seller_vat_number');
+  // Franchise en base (293 B) : le vendeur n'a souvent pas de n° de TVA ;
+  // BR-E-02 se contente alors de BT-32 (taxRegistrationId).
+  if (input.regime.regimeCode === FRANCHISE_REGIME_CODE) {
+    if (!seller.vatNumber && !seller.taxRegistrationId) missing.push('seller_tax_registration');
+  } else if (!seller.vatNumber) {
+    missing.push('seller_vat_number');
+  }
   if (!seller.addressLine1) missing.push('seller_address');
   if (!seller.postalCode) missing.push('seller_postal_code');
   if (!seller.city) missing.push('seller_city');
@@ -251,22 +271,32 @@ export function sirenFromSiret(siret: string | null | undefined): string | null 
 // ============================================================================
 
 interface VatBreakdownEntry {
-  categoryCode: 'S' | 'K' | 'G';
+  categoryCode: VatCategory;
   /** Fraction. */
   rate: number;
   basis: number;
   tax: number;
 }
 
-function vatCategory(regime: FacturXVatRegime): 'S' | 'K' | 'G' {
+type VatCategory = 'S' | 'K' | 'G' | 'E';
+
+/** Franchise en base de TVA (art. 293 B du CGI). */
+export const FRANCHISE_REGIME_CODE = '293 B';
+export const FRANCHISE_LEGAL_MENTION = 'TVA non applicable, art. 293 B du CGI';
+
+function vatCategory(regime: FacturXVatRegime): VatCategory {
   if (regime.regimeCode === '262 ter I') return 'K';
   if (regime.regimeCode === '262 I') return 'G';
+  if (regime.regimeCode === FRANCHISE_REGIME_CODE) return 'E';
   return 'S';
 }
 
-const EXEMPTION_REASON_CODE: Record<'K' | 'G', string> = {
+const EXEMPTION_REASON_CODE: Record<Exclude<VatCategory, 'S'>, string> = {
   K: 'VATEX-EU-IC',
   G: 'VATEX-EU-G',
+  // Liste VATEX (CEF) : code français de la franchise en base. À confirmer au
+  // schematron de la PA en sandbox avant la première émission réelle.
+  E: 'VATEX-FR-FRANCHISE',
 };
 
 /**
@@ -277,18 +307,22 @@ const EXEMPTION_REASON_CODE: Record<'K' | 'G', string> = {
  */
 function computeVatBreakdown(
   input: FacturXInvoiceInput,
-  category: 'S' | 'K' | 'G',
+  category: VatCategory,
 ): VatBreakdownEntry[] {
   const byRate = new Map<number, number>();
   const add = (rate: number, amount: number) => {
     byRate.set(rate, (byRate.get(rate) ?? 0) + amount);
   };
 
+  // Hors catégorie S il n'y a pas de taux : toutes les bases vont dans UNE
+  // ventilation à 0 % (un taux saisi par erreur sur une ligne exonérée ne doit
+  // pas fabriquer une seconde ventilation E/K/G).
+  const rateOf = (l: FacturXLine) => (category === 'S' ? l.taxRate : 0);
   for (const line of input.lines) {
     if (line.lineType === 'discount') {
-      add(line.taxRate, -Math.abs(line.totalPrice)); // remise = base négative
+      add(rateOf(line), -Math.abs(line.totalPrice)); // remise = base négative
     } else {
-      add(line.taxRate, line.totalPrice); // produits, fees, port
+      add(rateOf(line), line.totalPrice); // produits, fees, port
     }
   }
 
@@ -361,6 +395,9 @@ export function buildFacturXCII(input: FacturXInvoiceInput): string {
   }
 
   const category = vatCategory(input.regime);
+  // La mention d'exonération est obligatoire en franchise : défaut légal si absente.
+  const legalMention =
+    input.regime.legalMention || (category === 'E' ? FRANCHISE_LEGAL_MENTION : null);
 
   // --- Découpage des lignes ---------------------------------------------------
   const itemLines = input.lines.filter(
@@ -398,10 +435,10 @@ export function buildFacturXCII(input: FacturXInvoiceInput): string {
 
   // --- Notes de document (BG-1) ------------------------------------------------
   const notes: Array<{ content: string; subjectCode?: string }> = [];
-  if (input.regime.legalMention) notes.push({ content: input.regime.legalMention });
+  if (legalMention) notes.push({ content: legalMention });
   notes.push({ content: TRANSACTION_NATURE_NOTE[input.transactionNature] });
   if (input.vatOnDebits) notes.push({ content: VAT_ON_DEBITS_NOTE });
-  if (input.notes && input.notes !== input.regime.legalMention) {
+  if (input.notes && input.notes !== legalMention) {
     notes.push({ content: input.notes });
   }
   // BR-FR-05 : les trois mentions FR sont OBLIGATOIRES (SubjectCode PMD/PMT/AAB) —
@@ -489,6 +526,12 @@ export function buildFacturXCII(input: FacturXInvoiceInput): string {
         tag('ram:ID', escapeXml(party.vatNumber.replace(/\s/g, '')), ' schemeID="VA"'),
       );
     }
+    if (party.taxRegistrationId) {
+      xml += tag(
+        'ram:SpecifiedTaxRegistration',
+        tag('ram:ID', escapeXml(party.taxRegistrationId.replace(/\s/g, '')), ' schemeID="FC"'),
+      );
+    }
     return xml;
   };
 
@@ -572,8 +615,8 @@ export function buildFacturXCII(input: FacturXInvoiceInput): string {
         'ram:ApplicableTradeTax',
         tag('ram:CalculatedAmount', amt(entry.tax)) +
           tag('ram:TypeCode', 'VAT') +
-          (category !== 'S' && input.regime.legalMention
-            ? tag('ram:ExemptionReason', escapeXml(input.regime.legalMention))
+          (category !== 'S' && legalMention
+            ? tag('ram:ExemptionReason', escapeXml(legalMention))
             : '') +
           tag('ram:BasisAmount', amt(entry.basis)) +
           tag('ram:CategoryCode', entry.categoryCode) +
