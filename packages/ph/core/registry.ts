@@ -22,10 +22,11 @@ import { magnati } from "../providers/magnati/adapter.ts";
 import { adyen } from "../providers/adyen/adapter.ts";
 import { wise } from "../providers/wise/adapter.ts";
 import { paypal } from "../providers/paypal/adapter.ts";
+import { wero } from "../providers/wero/adapter.ts";
 
 export const providers: Record<ProviderKey, ProviderAdapter> = {
   stripe, aani, bank_transfer: bankTransfer, cash, paynow, mpesa, ozow, payshap, beau_wallet: beauWallet,
-  network_international: networkInternational, magnati, adyen, wise, paypal,
+  network_international: networkInternational, magnati, adyen, wise, paypal, wero,
 };
 
 export const providerKeys = Object.keys(providers) as ProviderKey[];

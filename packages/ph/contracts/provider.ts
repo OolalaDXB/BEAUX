@@ -22,7 +22,7 @@
 
 export type ProviderKey =
   | "stripe" | "aani" | "bank_transfer" | "cash" | "paynow" | "mpesa" | "ozow" | "payshap" | "beau_wallet"
-  | "network_international" | "magnati" | "adyen" | "wise" | "paypal";
+  | "network_international" | "magnati" | "adyen" | "wise" | "paypal" | "wero";
 export type ProviderKind = "online" | "manual" | "crypto";
 export type Confirmation = "provider_event" | "operator" | "unavailable";
 export type Readiness = "available" | "not_configured" | "placeholder";
