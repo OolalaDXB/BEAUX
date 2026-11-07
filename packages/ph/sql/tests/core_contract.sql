@@ -349,5 +349,44 @@ begin
   if (e1 ->> 'to') = 'paid' and exists (select 1 from beau_ph.payment_events where id = (e1 ->> 'payment_event_id')::uuid and actor = 'operator' and actor_id = 'op@test') then ok := ok + 1; else fail := fail + 1; log := log || ' [cash: operator confirm]'; end if;
   begin perform beau_ph.confirm_manual(rC, 'op@test', 4000, 'USD'); fail := fail + 1; log := log || ' [cash: confirmed twice]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
 
+  /* ---- 26. fees, per method: a default, the merchant's own, one calculation, who pays ---- */
+  j := beau_ph.method_fee(mk, 'stripe', 10000, 'AED');
+  if (j ->> 'fee')::int = 0 and (j ->> 'charged')::int = 0 and j ->> 'payer' = 'merchant' and j ->> 'source' = 'default' then ok := ok + 1; else fail := fail + 1; log := log || ' [fees: default not zero/merchant ' || j::text || ']'; end if;
+  j := beau_ph.merchant_method_set_fees(mk, 'stripe', '{"percent":5,"payer":"payer"}'::jsonb, 'fees@test');
+  if j -> 'fees' ->> 'payer' = 'payer' and (j -> 'fees_effective' ->> 'percent')::numeric = 5 and j -> 'fees_effective' ->> 'source' = 'merchant' then ok := ok + 1; else fail := fail + 1; log := log || ' [fees: set ' || (j -> 'fees')::text || ']'; end if;
+  j := beau_ph.method_fee(mk, 'stripe', 30000, 'AED');
+  if (j ->> 'fee')::int = 1500 and (j ->> 'charged')::int = 1500 then ok := ok + 1; else fail := fail + 1; log := log || ' [fees: 5 % of 300.00 ' || j::text || ']'; end if;
+  -- half up, and a fixed amount only in its own currency, never converted
+  perform beau_ph.merchant_method_set_fees(mk, 'stripe', '{"percent":2.9,"fixed":{"USD":30},"payer":"payer"}'::jsonb, 'fees@test');
+  if (beau_ph.method_fee(mk, 'stripe', 1000, 'USD') ->> 'fee')::int = 59 and (beau_ph.method_fee(mk, 'stripe', 1000, 'AED') ->> 'fee')::int = 29 then ok := ok + 1; else fail := fail + 1; log := log || ' [fees: rounding / fixed per currency]'; end if;
+  -- carried by the merchant: a cost, nothing added to the price
+  perform beau_ph.merchant_method_set_fees(mk, 'stripe', '{"percent":3,"payer":"merchant"}'::jsonb, 'fees@test');
+  j := beau_ph.method_fee(mk, 'stripe', 10000, 'AED');
+  if (j ->> 'fee')::int = 300 and (j ->> 'charged')::int = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [fees: merchant-carried charged]'; end if;
+  -- per method: another rail of the same merchant is untouched; another merchant too
+  if (beau_ph.method_fee(mk, 'bank_transfer', 10000, 'AED') ->> 'fee')::int = 0 and (beau_ph.method_fee('ph_other', 'stripe', 10000, 'AED') ->> 'fee')::int = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [fees: leak across method or merchant]'; end if;
+  -- bounds: refused, nothing written
+  begin perform beau_ph.merchant_method_set_fees(mk, 'stripe', '{"percent":25}'::jsonb, 'fees@test'); fail := fail + 1; log := log || ' [fees: 25 %]'; exception when sqlstate '22023' then ok := ok + 1; end;
+  begin perform beau_ph.merchant_method_set_fees(mk, 'stripe', '{"percent":-1}'::jsonb, 'fees@test'); fail := fail + 1; log := log || ' [fees: negative]'; exception when sqlstate '22023' then ok := ok + 1; end;
+  begin perform beau_ph.merchant_method_set_fees(mk, 'stripe', '{"fixed":{"usd":30}}'::jsonb, 'fees@test'); fail := fail + 1; log := log || ' [fees: lowercase currency]'; exception when sqlstate '22023' then ok := ok + 1; end;
+  begin perform beau_ph.merchant_method_set_fees(mk, 'stripe', '{"fixed":{"USD":0.5}}'::jsonb, 'fees@test'); fail := fail + 1; log := log || ' [fees: fractional minor unit]'; exception when sqlstate '22023' then ok := ok + 1; end;
+  begin perform beau_ph.merchant_method_set_fees(mk, 'stripe', '{"payer":"client"}'::jsonb, 'fees@test'); fail := fail + 1; log := log || ' [fees: payer]'; exception when sqlstate '22023' then ok := ok + 1; end;
+  begin perform beau_ph.merchant_method_set_fees(mk, 'stripe', '{"percent":5,"secret":"x"}'::jsonb, 'fees@test'); fail := fail + 1; log := log || ' [fees: unknown key]'; exception when sqlstate '22023' then ok := ok + 1; end;
+  begin perform beau_ph.merchant_method_set_fees(mk, 'wero', '{"percent":1}'::jsonb, 'fees@test'); fail := fail + 1; log := log || ' [fees: unconfigured method]'; exception when sqlstate 'P0002' then ok := ok + 1; end;
+  begin perform beau_ph.method_fee(mk, 'stripe', -1, 'AED'); fail := fail + 1; log := log || ' [fees: negative amount]'; exception when sqlstate '22023' then ok := ok + 1; end;
+  if (beau_ph.method_fee(mk, 'stripe', 10000, 'AED') ->> 'percent')::numeric = 3 then ok := ok + 1; else fail := fail + 1; log := log || ' [fees: a refused write changed something]'; end if;
+  -- back to the default; every change is in the audit
+  j := beau_ph.merchant_method_set_fees(mk, 'stripe', null, 'fees@test');
+  if j -> 'fees' = 'null'::jsonb and j -> 'fees_effective' ->> 'source' = 'default' and (beau_ph.method_fee(mk, 'stripe', 10000, 'AED') ->> 'fee')::int = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [fees: reset to default]'; end if;
+  if exists (select 1 from jsonb_array_elements(beau_ph.config_audit_list(mk, 200)) a where a ->> 'area' = 'merchant_method' and a ->> 'actor' = 'fees@test') then ok := ok + 1; else fail := fail + 1; log := log || ' [fees: not audited]'; end if;
+  -- the catalogue default is what an unset merchant gets
+  update beau_ph.providers set default_fees = '{"percent":1.5,"fixed":{},"payer":"merchant"}'::jsonb where key = 'stripe';
+  if (beau_ph.method_fee(mk, 'stripe', 10000, 'AED') ->> 'fee')::int = 150 then ok := ok + 1; else fail := fail + 1; log := log || ' [fees: catalogue default not used]'; end if;
+  begin update beau_ph.providers set default_fees = '{"percent":50}'::jsonb where key = 'stripe'; fail := fail + 1; log := log || ' [fees: bad catalogue default]'; exception when check_violation then ok := ok + 1; end;
+  -- never reachable from the browser
+  if not has_function_privilege('authenticated', 'beau_ph.method_fee(text, text, integer, text)', 'execute')
+     and not has_function_privilege('authenticated', 'beau_ph.merchant_method_set_fees(text, text, jsonb, text)', 'execute')
+     and not has_function_privilege('anon', 'beau_ph.merchant_method_set_fees(text, text, jsonb, text)', 'execute') then ok := ok + 1; else fail := fail + 1; log := log || ' [fees: grants]'; end if;
+
   raise exception 'BEAU_PH_CORE_TESTS ok=% fail=% %', ok, fail, log;
 end $$;

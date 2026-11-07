@@ -12,6 +12,7 @@ ledger would trample each other).
 | File | Content |
 |---|---|
 | `migrations/0001_baseline.sql` | the whole schema as it ran in production on 2026-09-30, plus reference data (providers, capabilities, FX sources and currencies) |
+| `migrations/0003_method_fees.sql` | fees per payment method: a catalogue default, the merchant's own, who pays them, and `beau_ph.method_fee()` — the one calculation |
 
 ## Installing into a new database
 

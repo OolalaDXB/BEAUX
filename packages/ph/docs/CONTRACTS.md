@@ -35,6 +35,27 @@ or { ignore: "<why>" }
 
 Implemented today: `normalize_stripe_event` + `ingest_stripe_event`. Manual rails have no normalizer; they are confirmed by `beau_ph.confirm_manual(request, operator, amount, currency, reference, paid_at, note, merchant_key)` — the trailing `merchant_key` (also on `cancel_request`, `expire_request`, `attach_attempt`, `mark_reconciled`, `get_request`, `request_events`) scopes the call to the host's own merchant: a foreign request is "not found" (`P0002`).
 
+## B2. Fees, per payment method (`0003_method_fees`)
+
+A method can cost something, and the merchant decides who carries it.
+
+| Where | What |
+|---|---|
+| `providers.default_fees` | the catalogue default: `{"percent":0,"fixed":{},"payer":"merchant"}` |
+| `merchant_methods.fees` | the merchant's own; `NULL` = the catalogue default |
+| `beau_ph.merchant_method_set_fees(merchant, provider, fees, actor)` | the only writer; validated, audited; `NULL` goes back to the default |
+| `beau_ph.method_fee(merchant, provider, amount, currency)` | **the** calculation, in minor units: `fee = round(amount × percent / 100) + fixed[currency]`; `charged = fee` when `payer = "payer"`, else `0` |
+| `merchant_method_json(...)` | carries `fees` (own) and `fees_effective` (with `source`: merchant or default) |
+
+Shape: `{"percent": 0–20, "fixed": {"AED": 100}, "payer": "payer" | "merchant"}`.
+A fixed amount is per currency and never converted. A host adds `charged` to
+the amount it asks for, and never recomputes the fee itself.
+
+**Consumers in the EU and the UK may not be charged for paying by card** (PSD2
+art. 62(4); France: CMF L112-12). BEAU PH does not know who the payer is: a host
+serving consumers there keeps `payer = "merchant"`, or applies it to business
+clients only, as Sillon does.
+
 ## C. Host adapter contract — `beau-ph/contracts/host.ts`
 
 A host must provide exactly two translations and keep its own ledger authoritative:

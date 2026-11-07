@@ -20,7 +20,7 @@ of Coach Gari as the host; that is accurate — it is the first one.
 
 | Suite | What it proves |
 |---|---|
-| `sql/tests/core_contract.sql` — 98 checks | eligibility, authoritative amounts, event normalisation, manual rails never self-confirm, secrets never public, placeholder rails cannot pay, SoftPOS eligibility, rail configuration bounds, BEAU FX, cash — on a database with **no host at all** |
+| `sql/tests/core_contract.sql` — 118 checks | eligibility, authoritative amounts, event normalisation, manual rails never self-confirm, secrets never public, placeholder rails cannot pay, SoftPOS eligibility, rail configuration bounds, BEAU FX, cash, fees per method — on a database with **no host at all** |
 | `tests/imports.test.mjs` | every module loads on its own |
 | `tests/webhook-signature.test.mjs` | Stripe signature verification (timing-safe, tolerance, rotation) |
 | `tests/stripe-embedded.test.mjs` | Checkout session parameters, payment mode, fee evidence |
