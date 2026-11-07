@@ -41,6 +41,19 @@ export function runtimeMap(env: EnvReader): RuntimeMap {
   return out;
 }
 
+/** What the operator screen shows for one rail: the adapter's OWN runtime() verdict — the
+ *  same code that takes the payment — plus which of its secrets are present (true/false,
+ *  never a value). The presence of every secret does not make an unimplemented adapter
+ *  ready (audit F04: the screen said "configured" where payment would be refused), and an
+ *  unknown key is never ready. */
+export function operatorReadiness(key: string, secretNames: string[], env: EnvReader) {
+  const secrets: Record<string, boolean> = {};
+  for (const name of secretNames) secrets[name] = !!(env(name) ?? "").length;
+  const a = adapter(key);
+  if (!a) return { configured: false, reason: "unknown provider", secrets };
+  return { ...a.runtime(env), secrets };
+}
+
 const SECRET_KEY_RE = /^(secret|api_?key|private_?key|password|passkey|access_?token|client_?secret|signing_?secret|webhook_?secret)$/i;
 const SECRET_VALUE_RE = /(sk|rk)_(live|test)_[A-Za-z0-9]{8,}|whsec_[A-Za-z0-9]{8,}/;
 
