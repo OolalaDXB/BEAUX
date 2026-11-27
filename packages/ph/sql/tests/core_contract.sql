@@ -443,5 +443,29 @@ begin
      and not has_function_privilege('authenticated', 'beau_ph.enqueue_provider_cancellation(uuid, text, text)', 'execute')
      and not has_function_privilege('anon', 'beau_ph.enqueue_provider_cancellation(uuid, text, text)', 'execute') then ok := ok + 1; else fail := fail + 1; log := log || ' [cx: grants]'; end if;
 
+  /* ---- PayPal: the catalogue row is complete, and its currencies are a ceiling (0005) ---- */
+  if (select secrets @> array['PAYPAL_CLIENT_ID','PAYPAL_SECRET','PAYPAL_WEBHOOK_ID'] and channel_label is not null and onboarding is not null
+        from beau_ph.providers where key = 'paypal') then ok := ok + 1; else fail := fail + 1; log := log || ' [paypal: secrets/label]'; end if;
+  if (select count(*) from beau_ph.providers p, jsonb_array_elements(p.config_schema) s
+       where p.key = 'paypal' and s ->> 'key' in ('paypal_business_email','account_holder','notes') and (s ->> 'public')::boolean) = 3
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [paypal: fields]'; end if;
+  if (select 'USD' = any (currencies) and 'EUR' = any (currencies) and not ('AED' = any (currencies)) and array_length(currencies, 1) = 24
+        from beau_ph.providers where key = 'paypal') then ok := ok + 1; else fail := fail + 1; log := log || ' [paypal: currencies]'; end if;
+  -- a merchant narrows a provider, never broadens it: a currency PayPal does not take cannot be switched on
+  begin
+    perform beau_ph.merchant_method_configure(mk, 'paypal', '{"enabled":true,"countries":["AE"],"currencies":["USD","AED"]}'::jsonb, 't');
+    fail := fail + 1; log := log || ' [paypal: AED accepted]';
+  exception when sqlstate 'P0003' then ok := ok + 1; end;
+  perform beau_ph.merchant_method_configure(mk, 'paypal', '{"enabled":true,"countries":["AE"],"currencies":["USD"],"intents":["other"],"capabilities":["online_checkout","wallet"]}'::jsonb, 't');
+  -- offered in a currency PayPal takes, with deployed credentials; never in one it does not, and never without them
+  if exists (select 1 from jsonb_array_elements(beau_ph.eligible_methods(mk, 'AE', 'USD', '{"paypal":{"configured":true,"mode":"test"}}'::jsonb, null, 'customer', 'other')) e
+              where e ->> 'provider' = 'paypal' and e ->> 'capability' = 'online_checkout')
+     and not exists (select 1 from jsonb_array_elements(beau_ph.eligible_methods(mk, 'AE', 'AED', '{"paypal":{"configured":true,"mode":"test"}}'::jsonb, null, 'customer', 'other')) e
+                      where e ->> 'provider' = 'paypal')
+     and not exists (select 1 from jsonb_array_elements(beau_ph.eligible_methods(mk, 'AE', 'USD', '{}'::jsonb, null, 'customer', 'other')) e
+                      where e ->> 'provider' = 'paypal')
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [paypal: eligibility]'; end if;
+  if exists (select 1 from beau_ph.schema_versions where version = '0005_paypal_catalogue') then ok := ok + 1; else fail := fail + 1; log := log || ' [paypal: version]'; end if;
+
   raise exception 'BEAU_PH_CORE_TESTS ok=% fail=% %', ok, fail, log;
 end $$;
