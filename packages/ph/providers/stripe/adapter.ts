@@ -32,7 +32,7 @@
    STRIPE_PUBLISHABLE_KEY (public by design, still mode-checked: a pk_ of the
    wrong mode refuses; missing pk_ disables the embedded surface only).
    ============================================================= */
-import type { CreateRequestInput, CreateRequestResult, EnvReader, ProviderAdapter, ProviderCapabilities, RuntimeReadiness, VerifiedEvent } from "../../contracts/provider.ts";
+import type { CancelResult, CreateRequestInput, CreateRequestResult, EnvReader, ProviderAdapter, ProviderCapabilities, RuntimeReadiness, VerifiedEvent } from "../../contracts/provider.ts";
 import { verifyStripeSignature } from "./signature.js";
 
 const DEFAULT_EXPIRES_S = 30 * 60; // Stripe minimum for Checkout expiry
@@ -282,11 +282,25 @@ export const stripe: ProviderAdapter = {
     return { providerStatus: `${s.status}/${s.payment_status}`, status, evidence: { checkout_session: s.id, payment_intent: s.payment_intent ?? null } };
   },
 
-  async cancel(providerReference: string, env: EnvReader) {
-    if (!stripe.runtime(env).configured) return { ok: false, reason: "not configured" };
+  /** Expire a Checkout Session. Stripe refuses to expire one that is no longer open (400), so a
+   *  refusal is never taken at face value: the session is read back and classified. Already
+   *  expired = done; paid = final (a refund is the merchant's call, never this function's);
+   *  unknown to this account = final; anything else = transient, retried by the queue. */
+  async cancel(providerReference: string, env: EnvReader): Promise<CancelResult> {
+    if (!stripe.runtime(env).configured) return { ok: false, reason: "not_configured" };
+    if (!/^cs_(test|live)_[A-Za-z0-9]+$/.test(providerReference)) return { ok: false, reason: "not_a_checkout_session", final: true };
     const key = env("STRIPE_SECRET_KEY")!;
-    const r = await fetch(`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(providerReference)}/expire`, { method: "POST", headers: { Authorization: `Bearer ${key}` } });
-    return r.ok ? { ok: true } : { ok: false, reason: `stripe ${r.status}` };
+    const url = `https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(providerReference)}`;
+    const r = await fetch(`${url}/expire`, { method: "POST", headers: { Authorization: `Bearer ${key}` } });
+    if (r.ok) return { ok: true };
+    if (r.status === 429 || r.status >= 500) return { ok: false, reason: `stripe ${r.status}` };
+    const g = await fetch(url, { headers: { Authorization: `Bearer ${key}` } });
+    if (g.status === 404) return { ok: false, reason: "unknown_at_provider", final: true };
+    const s = await g.json().catch(() => null);
+    if (!g.ok || !s) return { ok: false, reason: `stripe ${r.status}/${g.status}` };
+    if (s.status === "expired") return { ok: true, already: true };
+    if (s.status === "complete") return { ok: false, reason: `paid_at_provider:${s.payment_status ?? "unknown"}`, final: true };
+    return { ok: false, reason: `stripe ${r.status} session ${s.status ?? "unknown"}` };
   },
 
   async verifyWebhook(req: { headers: Headers; rawBody: string }, env: EnvReader): Promise<VerifiedEvent> {
