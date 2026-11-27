@@ -14,6 +14,7 @@ ledger would trample each other).
 | `migrations/0001_baseline.sql` | the whole schema as it ran in production on 2026-09-30, plus reference data (providers, capabilities, FX sources and currencies) |
 | `migrations/0003_method_fees.sql` | fees per payment method: a catalogue default, the merchant's own, who pays them, and `beau_ph.method_fee()` — the one calculation |
 | `migrations/0004_cancel_every_attempt.sql` | the provider cancellation queue covers every attempt: a superseded Checkout Session is cancelled when the next one opens, a closing request queues every reference it ever had; one row per (request, reference) |
+| `migrations/0005_paypal_catalogue.sql` | the PayPal catalogue row filled in: secret names, configuration fields, channel label, onboarding, and PayPal's currency list as a ceiling (AED is not on it) |
 
 ## Installing into a new database
 

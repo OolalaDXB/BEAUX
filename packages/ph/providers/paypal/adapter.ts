@@ -7,6 +7,15 @@
    coming back to the return URL. That is the same rule the Stripe adapter
    follows, for the same reason: a return URL is a navigation, not a receipt.
 
+   TWO STEPS, AND THE SECOND IS OURS. Intent CAPTURE does not take the money by
+   itself: once the payer has approved, the merchant must call
+   POST /v2/checkout/orders/{id}/capture. Until then nothing moves and
+   PAYMENT.CAPTURE.COMPLETED is never sent. capturePaymentRequest() is that
+   call. A host triggers it from two places — a verified CHECKOUT.ORDER.APPROVED
+   event, and the payer's return to the site — after checking that the request
+   behind the order may still be paid. Its answer confirms nothing: the capture
+   event it causes does, through the webhook, like any other payment.
+
    BUSINESS ACCOUNT, AND NEVER FRIENDS AND FAMILY. A commercial payment sent as
    "Friends and Family" breaches PayPal's terms, removes protection for both
    sides, and is the usual reason a receiving account gets limited. This adapter
@@ -30,7 +39,7 @@
    value, never a prefix.
    ============================================================= */
 import type {
-  Capability, CreateRequestInput, CreateRequestResult, EnvReader, ProviderAdapter, ProviderCapabilities,
+  Capability, CaptureResult, CreateRequestInput, CreateRequestResult, EnvReader, ProviderAdapter, ProviderCapabilities,
   RuntimeReadiness, StatusResult, VerifiedEvent,
 } from "../../contracts/provider.ts";
 
@@ -44,10 +53,24 @@ export function paymentsMode(env: EnvReader): "test" | "live" | null {
 }
 const apiBase = (mode: "test" | "live") => (mode === "live" ? LIVE : SANDBOX);
 
+const ORDER_ID_RE = /^[A-Za-z0-9-]{6,64}$/;
+
+/** PayPal's own approval pages, and nothing else: the only places a host should ever send a payer. */
+export function isPayPalApprovalUrl(url: unknown): url is string {
+  if (typeof url !== "string") return false;
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && (u.hostname === "www.paypal.com" || u.hostname === "www.sandbox.paypal.com");
+  } catch { return false; }
+}
+
 /* Currencies PayPal settles without decimals. Everything else it quotes with
    two. PayPal does not support three-decimal currencies, so a request in one
    cannot be created rather than being silently rounded. */
 const ZERO_DECIMAL = new Set(["HUF", "JPY", "TWD"]);
+/** The currencies PayPal accepts. BRL, CNY and MYR are in-country only at PayPal. */
+export const PAYPAL_CURRENCIES = ["AUD", "BRL", "CAD", "CHF", "CNY", "CZK", "DKK", "EUR", "GBP", "HKD", "HUF", "ILS", "JPY", "MXN",
+  "MYR", "NOK", "NZD", "PHP", "PLN", "SEK", "SGD", "THB", "TWD", "USD"] as const;
 const THREE_DECIMAL = new Set(["BHD", "IQD", "JOD", "KWD", "LYD", "OMR", "TND"]);
 
 /** Minor units → the decimal string PayPal expects. */
@@ -134,8 +157,9 @@ export const paypal: ProviderAdapter = {
       ],
       supports: { checkout: true, instructions: true, webhook: true, statusPoll: true, cancel: false, refundEvents: true },
       countries: null,
-      // PayPal cannot quote a three-decimal currency; the amount helpers refuse one rather than round it.
-      currencies: null,
+      // What PayPal takes (its published currency codes). AED is not among them. The catalogue row carries the
+      // same list (sql/migrations/0005), so a merchant cannot enable PayPal in a currency it would refuse.
+      currencies: [...PAYPAL_CURRENCIES],
       secrets: ["PAYPAL_CLIENT_ID", "PAYPAL_SECRET", "PAYPAL_WEBHOOK_ID"],
     };
   },
@@ -214,6 +238,53 @@ export const paypal: ProviderAdapter = {
       PAYER_ACTION_REQUIRED: "requires_action", COMPLETED: "paid", VOIDED: "cancelled",
     };
     return { providerStatus: ps, status: map[ps] ?? null };
+  },
+
+  /* Take the money on an order the payer has approved. One capture per order,
+     however many times it is asked (webhook and return page both ask): the
+     idempotency key is the order. "Already captured" is a success. Never
+     throws; never logs or returns a credential. */
+  async capturePaymentRequest(providerReference: string, env: EnvReader, fetchImpl: typeof fetch = fetch): Promise<CaptureResult> {
+    if (!ORDER_ID_RE.test(providerReference)) return { ok: false, reason: "invalid_order_id", final: true };
+    const rt = readiness(env);
+    if (!rt.configured || !rt.mode) return { ok: false, reason: "not_configured", final: false };
+
+    let token: string;
+    try { token = await accessToken(env, rt.mode, fetchImpl); }
+    catch (e) {
+      const m = e instanceof Error && /^paypal_auth_\d+$/.test(e.message) ? e.message.replace("paypal_", "") : "provider_unavailable";
+      return { ok: false, reason: m, final: false };
+    }
+
+    let r: Response;
+    try {
+      r = await fetchImpl(`${apiBase(rt.mode)}/v2/checkout/orders/${encodeURIComponent(providerReference)}/capture`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "PayPal-Request-Id": `capture-${providerReference}`,
+        },
+        body: "{}",
+      });
+    } catch { return { ok: false, reason: "provider_unavailable", final: false }; }
+
+    if (r.ok) {
+      const j = await r.json().catch(() => ({})) as { status?: string };
+      return { ok: true, status: String(j.status ?? "UNKNOWN"), already: false };
+    }
+    const j = await r.json().catch(() => ({})) as { details?: { issue?: string }[] };
+    const issue = String(j.details?.[0]?.issue ?? "");
+    if (issue === "ORDER_ALREADY_CAPTURED") return { ok: true, status: "COMPLETED", already: true };
+    // not approved yet, or the payer left PayPal without paying: nothing to take until they do
+    if (issue === "ORDER_NOT_APPROVED") return { ok: false, reason: "not_approved", final: true };
+    if (issue === "INSTRUMENT_DECLINED") return { ok: false, reason: "instrument_declined", final: true };
+    if (r.status === 404) return { ok: false, reason: "unknown_order", final: true };
+    return {
+      ok: false,
+      reason: issue ? `paypal_${issue.toLowerCase()}`.slice(0, 60) : `provider_error_${r.status}`,
+      final: r.status >= 400 && r.status < 500 && r.status !== 429,
+    };
   },
 
   /* PayPal verifies its own signatures: the transmission headers plus the raw

@@ -11,7 +11,7 @@
   },
   "scripts": {
     "test": "npm run test:ph && npm run test:facture",
-    "test:ph": "node packages/ph/tests/imports.test.mjs && node packages/ph/tests/webhook-signature.test.mjs && node packages/ph/tests/stripe-embedded.test.mjs && node packages/ph/tests/operator-readiness.test.mjs && node packages/ph/tests/cancellations.test.mjs",
+    "test:ph": "node packages/ph/tests/imports.test.mjs && node packages/ph/tests/webhook-signature.test.mjs && node packages/ph/tests/stripe-embedded.test.mjs && node packages/ph/tests/operator-readiness.test.mjs && node packages/ph/tests/cancellations.test.mjs && node packages/ph/tests/paypal.test.mjs",
     "test:ph:db": "bash packages/ph/scripts/db-test.sh",
     "test:facture": "tsc -p packages/facture && tsc -p packages/facture/tsconfig.loose.json && vitest run --root packages/facture"
   },

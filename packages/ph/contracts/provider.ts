@@ -140,6 +140,16 @@ export type CancelResult =
   | { ok: true; already?: boolean }
   | { ok: false; reason: string; final?: boolean };
 
+/** The provider's answer to "take the money now" on an attempt the payer has approved.
+ *  `ok: true` — the provider has taken it (`already`: it had been taken before this call).
+ *  `ok: false, final: true` — asking again cannot help as things stand (not approved, declined, unknown reference).
+ *  `ok: false` — transient: the caller may ask again.
+ *  A capture is a REQUEST, never a confirmation: nothing is marked paid on its answer. The verified
+ *  provider event it causes is what reaches beau_ph.ingest_provider_event. */
+export type CaptureResult =
+  | { ok: true; status: string; already: boolean }
+  | { ok: false; reason: string; final: boolean };
+
 export type VerifiedEvent =
   | { ok: true; providerEventId: string; eventType: string; payload: Record<string, unknown> }
   | { ok: false; reason: string };
@@ -164,6 +174,9 @@ export interface ProviderAdapter {
    *  `ok: false, final: true` — retrying cannot help (paid at the provider, unknown reference): the row leaves the queue as skipped with the reason.
    *  `ok: false` — transient: retried, five attempts at most. */
   cancel?(providerReference: string, env: EnvReader): Promise<CancelResult>;
+  /** Two-step rails (the payer approves, then the merchant takes the money): take it. The HOST decides whether it
+   *  still may — a withdrawn or already-settled request must not be captured — and calls this only then. */
+  capturePaymentRequest?(providerReference: string, env: EnvReader): Promise<CaptureResult>;
   /** Verify a provider callback. Only a verified event may reach beau_ph.ingest_provider_event. */
   verifyWebhook?(req: { headers: Headers; rawBody: string }, env: EnvReader): Promise<VerifiedEvent>;
   /** reconcile(): add provider evidence (fees, balance transactions) BEFORE the DB normalizer runs. Never mutates state. */
