@@ -11,7 +11,7 @@ One generic contract for every rail. Not every provider implements every capabil
 | `eligibility()` | adapter-side extra rule (DB matrix stays the authority) | – | ✔ (AED only) | – | – | – |
 | `createPaymentRequest()` | online: embedded (client secret) or redirect · manual: instructions | ✔ embedded Checkout Session (`ui_mode=embedded`, dynamic `price_data`; hosted redirect still supported) | ✔ instructions | ✔ instructions | `unavailable` | `unavailable` |
 | `getStatus()` | poll the provider | ✔ | – | – | – | – |
-| `cancel()` | cancel/expire the provider-side attempt | ✔ | – | – | – | – |
+| `cancel()` | cancel/expire the provider-side attempt → `CancelResult` (`ok` / `already`; `final` = do not retry). Never called by a payer: `drainCancellations()` (`core/cancellations.ts`) empties the database queue | ✔ (expire; a refusal is read back: expired = done, paid = final) | – | – | – | – |
 | `verifyWebhook()` | signature verification — only verified events reach the core | ✔ (Stripe scheme, raw body, 300 s, live-mode refused) | – | – | `ok:false provider_not_configured` | `ok:false provider_placeholder` |
 | `enrich()` (= reconcile) | add provider evidence before normalization, never mutates state | ✔ (fee, charge, balance transaction) | – | – | – | – |
 | `instructionFields()` | public fields the merchant configures and the payer sees | – | ✔ | ✔ | – | – |

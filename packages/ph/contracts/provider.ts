@@ -136,6 +136,10 @@ export type CreateRequestResult =
 
 export interface StatusResult { providerStatus: string; status: PaymentStatus | null; evidence?: Record<string, unknown> }
 
+export type CancelResult =
+  | { ok: true; already?: boolean }
+  | { ok: false; reason: string; final?: boolean };
+
 export type VerifiedEvent =
   | { ok: true; providerEventId: string; eventType: string; payload: Record<string, unknown> }
   | { ok: false; reason: string };
@@ -155,7 +159,11 @@ export interface ProviderAdapter {
   /** Embedded rails: re-open a still-valid provider session (same reference) instead of creating a second one. `unavailable` when it is no longer open. */
   resumePaymentRequest?(providerReference: string, env: EnvReader): Promise<CreateRequestResult>;
   getStatus?(providerReference: string, env: EnvReader): Promise<StatusResult>;
-  cancel?(providerReference: string, env: EnvReader): Promise<{ ok: boolean; reason?: string }>;
+  /** Expire / cancel the provider-side attempt. Called by drainCancellations() (core/cancellations.ts), never by a payer.
+   *  `ok: true` — it can no longer be paid (`already`: it was closed before this call).
+   *  `ok: false, final: true` — retrying cannot help (paid at the provider, unknown reference): the row leaves the queue as skipped with the reason.
+   *  `ok: false` — transient: retried, five attempts at most. */
+  cancel?(providerReference: string, env: EnvReader): Promise<CancelResult>;
   /** Verify a provider callback. Only a verified event may reach beau_ph.ingest_provider_event. */
   verifyWebhook?(req: { headers: Headers; rawBody: string }, env: EnvReader): Promise<VerifiedEvent>;
   /** reconcile(): add provider evidence (fees, balance transactions) BEFORE the DB normalizer runs. Never mutates state. */

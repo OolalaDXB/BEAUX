@@ -20,12 +20,13 @@ of Coach Gari as the host; that is accurate — it is the first one.
 
 | Suite | What it proves |
 |---|---|
-| `sql/tests/core_contract.sql` — 118 checks | eligibility, authoritative amounts, event normalisation, manual rails never self-confirm, secrets never public, placeholder rails cannot pay, SoftPOS eligibility, rail configuration bounds, BEAU FX, cash, fees per method — on a database with **no host at all** |
+| `sql/tests/core_contract.sql` — 127 checks | eligibility, authoritative amounts, event normalisation, manual rails never self-confirm, secrets never public, placeholder rails cannot pay, SoftPOS eligibility, rail configuration bounds, BEAU FX, cash, fees per method, the provider cancellation queue (every attempt, once) — on a database with **no host at all** |
 | `tests/imports.test.mjs` | every module loads on its own |
 | `tests/webhook-signature.test.mjs` | Stripe signature verification (timing-safe, tolerance, rotation) |
 | `tests/stripe-embedded.test.mjs` | Checkout session parameters, payment mode, fee evidence |
+| `tests/cancellations.test.mjs` | Stripe `cancel()` reads a refusal back (expired / paid / unknown); `drainCancellations()` never cancels with the other mode's key, never burns an attempt on a misconfigured deployment, leaves the queue with the reason |
 
 The host half of the contract (a host reconciles once, idempotently; multi-rail
-races; multi-tenant isolation against a real host; test/live never cross;
-cancellation at the provider) runs in the host's own repository — for Coach Gari,
+races; multi-tenant isolation against a real host; test/live never cross)
+runs in the host's own repository — for Coach Gari,
 `supabase/tests/beau_ph_contract.sql`.

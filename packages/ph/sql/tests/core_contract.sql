@@ -22,6 +22,7 @@ declare
   cA uuid; p1 uuid; p2 uuid; p3 uuid; oref text; oref2 text; ph_ev uuid; ordid uuid; tok text; ev jsonb;
   p4 uuid; oref4 text; rA uuid; rB uuid; jB jsonb; nB int;
   q1 jsonb; q2 jsonb; qid uuid; mid uuid; nA int; p5 uuid; tok5 text; j5 jsonb; rC uuid; v int;
+  cx1 uuid; cx2 uuid; cx3 uuid; cxj jsonb; cxid uuid; cxn int;
 begin
   insert into beau_ph.merchants (key, name, country, default_currency, mode) values (mk, 'Contract Test', 'ZW', 'USD', 'test');
   -- merchant configuration is explicit (countries + currencies persisted); a provider's open coverage is never read as "any"
@@ -387,6 +388,60 @@ begin
   if not has_function_privilege('authenticated', 'beau_ph.method_fee(text, text, integer, text)', 'execute')
      and not has_function_privilege('authenticated', 'beau_ph.merchant_method_set_fees(text, text, jsonb, text)', 'execute')
      and not has_function_privilege('anon', 'beau_ph.merchant_method_set_fees(text, text, jsonb, text)', 'execute') then ok := ok + 1; else fail := fail + 1; log := log || ' [fees: grants]'; end if;
+
+  /* ---- provider cancellation queue (0004): every attempt, once; drained by core/cancellations.ts ---- */
+  j := beau_ph.create_request(mk, 'stripe', 'ORD-CX1', 'REF-7001', 1500, 'USD', 'ZW', null, '{}'::jsonb, rt); cx1 := (j ->> 'id')::uuid;
+  perform beau_ph.attach_attempt(cx1, 'cs_q1', 'https://checkout.example/q1', now() + interval '30 min');
+  perform beau_ph.attach_attempt(cx1, 'cs_q2', 'https://checkout.example/q2', now() + interval '30 min');
+  -- a superseded session is cancelled at the provider at once, the new one is not
+  if exists (select 1 from beau_ph.provider_cancellations where request_id = cx1 and provider_reference = 'cs_q1' and status = 'pending' and reason = 'superseded')
+     and not exists (select 1 from beau_ph.provider_cancellations where request_id = cx1 and provider_reference = 'cs_q2') then ok := ok + 1; else fail := fail + 1; log := log || ' [cx: superseded attempt not queued]'; end if;
+  -- a resumed session keeps its reference: never cancelled while it is the live one
+  perform beau_ph.attach_attempt(cx1, 'cs_q2', 'https://checkout.example/q2', now() + interval '30 min');
+  if not exists (select 1 from beau_ph.provider_cancellations where request_id = cx1 and provider_reference = 'cs_q2') then ok := ok + 1; else fail := fail + 1; log := log || ' [cx: resumed session cancelled]'; end if;
+  -- closing the request queues every reference it ever had, each once
+  perform beau_ph.cancel_request(cx1, 'system', null, 'test');
+  perform beau_ph.cancel_request(cx1, 'system', null, 'test again');
+  select count(*) into cxn from beau_ph.provider_cancellations where request_id = cx1;
+  if cxn = 2 and exists (select 1 from beau_ph.provider_cancellations where request_id = cx1 and provider_reference = 'cs_q2' and status = 'pending' and reason = 'cancelled')
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [cx: close did not queue each reference once, n=' || cxn || ']'; end if;
+  -- an attempt superseded BEFORE 0004 was never queued: closing the request still cancels it
+  j := beau_ph.create_request(mk, 'stripe', 'ORD-CX4', 'REF-7004', 1500, 'USD', 'ZW', null, '{}'::jsonb, rt); cxid := (j ->> 'id')::uuid;
+  insert into beau_ph.payment_attempts (request_id, n, provider_reference, status) values (cxid, 1, 'cs_old', 'superseded');
+  perform beau_ph.attach_attempt(cxid, 'cs_new', 'https://checkout.example/new', now() + interval '30 min');
+  delete from beau_ph.provider_cancellations where request_id = cxid;   -- the state a pre-0004 database is in
+  perform beau_ph.cancel_request(cxid, 'system', null, 'test');
+  if (select array_agg(provider_reference order by provider_reference) from beau_ph.provider_cancellations where request_id = cxid and status = 'pending') = array['cs_new','cs_old']
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [cx: historic superseded attempt not cancelled on close]'; end if;
+  -- never opened at the provider / a rail without cancel: one skipped row with the reason
+  j := beau_ph.create_request(mk, 'stripe', 'ORD-CX2', 'REF-7002', 1500, 'USD', 'ZW', null, '{}'::jsonb, rt); cx2 := (j ->> 'id')::uuid;
+  perform beau_ph.cancel_request(cx2, 'system', null, 'test');
+  j := beau_ph.create_request(mk, 'bank_transfer', 'ORD-CX3', 'REF-7003', 1500, 'USD', 'ZW', null, '{}'::jsonb, rt); cx3 := (j ->> 'id')::uuid;
+  perform beau_ph.cancel_request(cx3, 'system', null, 'test');
+  if (select status || '/' || last_error from beau_ph.provider_cancellations where request_id = cx2) = 'skipped/never created at the provider'
+     and (select status || '/' || last_error from beau_ph.provider_cancellations where request_id = cx3) = 'skipped/rail has no cancel'
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [cx: skipped rows]'; end if;
+  -- what is due carries the merchant mode (the drainer never cancels with the other mode's key)
+  cxj := beau_ph.cancellations_due(100);
+  if (select count(*) from jsonb_array_elements(cxj) e where e ->> 'merchant' = mk and e ->> 'provider_reference' in ('cs_q1','cs_q2') and e ->> 'mode' = 'test') = 2
+     and not exists (select 1 from jsonb_array_elements(cxj) e where (e ->> 'id')::uuid in (select id from beau_ph.provider_cancellations where request_id in (cx2, cx3)))
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [cx: due ' || cxj::text || ']'; end if;
+  -- done is final; a second mark changes nothing
+  select id into cxid from beau_ph.provider_cancellations where request_id = cx1 and provider_reference = 'cs_q1';
+  perform beau_ph.cancellation_mark(cxid, true);
+  cxj := beau_ph.cancellation_mark(cxid, false, 'late failure');
+  if cxj ->> 'status' = 'done' and (cxj ->> 'attempts')::int = 1 and cxj ->> 'last_error' is null then ok := ok + 1; else fail := fail + 1; log := log || ' [cx: done not final ' || cxj::text || ']'; end if;
+  -- five failures and it leaves the queue as failed, with the last error
+  select id into cxid from beau_ph.provider_cancellations where request_id = cx1 and provider_reference = 'cs_q2';
+  for v in 1..5 loop perform beau_ph.cancellation_mark(cxid, false, 'stripe 500'); end loop;
+  if (select status || '/' || attempts || '/' || last_error from beau_ph.provider_cancellations where id = cxid) = 'failed/5/stripe 500'
+     and not exists (select 1 from jsonb_array_elements(beau_ph.cancellations_due(100)) e where (e ->> 'id')::uuid = cxid)
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [cx: retries]'; end if;
+  -- never reachable from the browser
+  if not has_function_privilege('authenticated', 'beau_ph.cancellations_due(integer)', 'execute')
+     and not has_function_privilege('authenticated', 'beau_ph.cancellation_mark(uuid, boolean, text, boolean)', 'execute')
+     and not has_function_privilege('authenticated', 'beau_ph.enqueue_provider_cancellation(uuid, text, text)', 'execute')
+     and not has_function_privilege('anon', 'beau_ph.enqueue_provider_cancellation(uuid, text, text)', 'execute') then ok := ok + 1; else fail := fail + 1; log := log || ' [cx: grants]'; end if;
 
   raise exception 'BEAU_PH_CORE_TESTS ok=% fail=% %', ok, fail, log;
 end $$;
